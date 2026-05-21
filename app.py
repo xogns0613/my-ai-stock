@@ -5,6 +5,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+import time  # 레이트 리밋 방지용 시간 지연 모듈 추가
 
 # 0. 세션 상태 초기화 (로그인, 모의투자 자산 마스터 계좌, 체결 히스토리)
 if 'auth_status' not in st.session_state: st.session_state['auth_status'] = False
@@ -99,6 +100,35 @@ if not st.session_state['auth_status']:
                 st.error("❌ 비밀번호가 올바르지 않습니다.")
     st.stop()
 
+# 🛡️ 안전하게 주식 데이터를 가져오는 캐싱 함수 정의 (차단 우회 핵심 기술)
+@st.cache_data(ttl=600)  # 10분(600초) 동안 동일 검색에 대해 서버 요청을 생략하고 메모리 데이터 재사용
+def fetch_stock_data(ticker, period_code, interval_code):
+    for attempt in range(3):  # 최대 3번까지 재시도 메커니즘 가동
+        try:
+            data = yf.download(ticker, period=period_code, interval=interval_code)
+            if not data.empty:
+                return data
+        except Exception:
+            time.sleep(1.5)  # 에러 발생 시 1.5초 대기 후 재시도
+    return yf.download(ticker, period=period_code, interval=interval_code)
+
+@st.cache_data(ttl=1800)  # 무거운 기업 요약 정보는 30분간 캐싱
+def fetch_ticker_info(ticker):
+    t = yf.Ticker(ticker)
+    
+    # 스트림릿 캐시 에러 방지: yfinance 특수 객체를 순수 파이썬 딕셔너리로 강제 변환
+    try:
+        f_info = dict(t.fast_info)
+    except Exception:
+        f_info = {}
+        
+    try:
+        i_info = dict(t.info)
+    except Exception:
+        i_info = {}
+        
+    return f_info, i_info
+
 # 2. 상단 섹션
 st.markdown("""
     <div class="search-container">
@@ -123,16 +153,12 @@ if user_input:
 
     try:
         with st.spinner(f"{selected_period_label} 데이터 실시간 동기화 중..."):
-            if is_daily_chart:
-                df_raw = yf.download(user_input, period="5y", interval="1d")
-            else:
-                p_code = period_map[selected_period_label]
-                i_code = interval_map[selected_period_label]
-                df_raw = yf.download(user_input, period=p_code, interval=i_code)
-
-            ticker_info = yf.Ticker(user_input)
-            fast_info = ticker_info.fast_info
-            info_dict = ticker_info.info
+            p_code = "5y" if is_daily_chart else period_map[selected_period_label]
+            i_code = interval_map[selected_period_label]
+            
+            # 우회 가동 엔진 적용
+            df_raw = fetch_stock_data(user_input, p_code, i_code)
+            fast_info, info_dict = fetch_ticker_info(user_input)
             
             # 구글 뉴스 RSS 연동으로 100% 한국 뉴스 및 핵심 요약 추출
             news_list = []
@@ -179,7 +205,7 @@ if user_input:
                 pass
             
         if df_raw.empty:
-            st.error(" 데이터를 불러오지 못했습니다. 기업코드를 확인해주세요.")
+            st.error(" 데이터를 불러오지 못했습니다. 잠시 후 다시 검색하거나 기업코드를 확인해주세요.")
         else:
             df = df_raw.copy()
             if isinstance(df.columns, pd.MultiIndex): 
@@ -217,9 +243,9 @@ if user_input:
                 v_open = v_high = v_low = v_close = period_return = 0
                 return_sign = ""
             
-            market_cap = info_dict.get('marketCap', fast_info.get('market_cap', 0))
-            per = info_dict.get('trailingPE', np.nan)
-            dividend = info_dict.get('trailingAnnualDividendYield', 0.0) * 100  
+            market_cap = info_dict.get('marketCap', fast_info.get('market_cap', 0)) if info_dict else fast_info.get('market_cap', 0)
+            per = info_dict.get('trailingPE', np.nan) if info_dict else np.nan
+            dividend = (info_dict.get('trailingAnnualDividendYield', 0.0) * 100) if info_dict else 0.0
             quarterly_dividend = dividend / 4 if dividend > 0 else 0.0 
             
             if market_cap > 1e12: mc_str = f"{market_cap / 1e12:,.1f}조"
@@ -241,9 +267,9 @@ if user_input:
             """, unsafe_allow_html=True)
 
             # 실제 주식창과 똑같은 형태의 대형 주가 전광판 정보 헤더 빌드 (차트 바로 위 배치)
-            comp_name = info_dict.get('longName', info_dict.get('shortName', user_input.upper()))
-            exchange = info_dict.get('exchange', 'MARKET')
-            currency = info_dict.get('currency', 'KRW')
+            comp_name = info_dict.get('longName', info_dict.get('shortName', user_input.upper())) if info_dict else user_input.upper()
+            exchange = info_dict.get('exchange', 'MARKET') if info_dict else 'MARKET'
+            currency = info_dict.get('currency', 'KRW') if info_dict else 'KRW'
             
             # 전일 대비 등락폭 계산도 1차원 정제된 변수로 안전 결합
             if len(df) >= 2:
@@ -502,7 +528,7 @@ if user_input:
                             <h4 style='color: #FFFFFF; margin-top: 0; margin-bottom: 10px;'> AI 종합 분석 결과 레포트</h4>
                             <div class='ai-report-text'>
                                 선택한 <strong>{selected_period_label}</strong> 기준 관측 결과, 최고가 {v_high:,.2f}와 최저가 {v_low:,.2f} 범위 안에서 매수/매도 공방이 진행되었습니다.<br>
-                                ARIMA 알고리즘 시뮬레이션은 현재의 펀더멘탈 요소를 따라 중심 추세를 우상향으로 잡고 있으며, LSTM 인경신경망 층은 단기 모멘텀에 따른 등락 파동을 예견합니다.
+                                ARIMA 알고리즘 시뮬레이션은 현재의 펀더멘탈 요소를 따라 중심 추세를 우상향으로 잡고 있으며, LSTM 인공신경망 층은 단기 모멘텀에 따른 등락 파동을 예견합니다.
                                 상기 차트에 표기된 <strong>매수/매도 기호(▲/▼)</strong>는 각 모델이 시뮬레이션한 30일 이내의 기하학적 전술적 극점(Trough & Peak) 분석 타점입니다.
                             </div>
                         </div>
