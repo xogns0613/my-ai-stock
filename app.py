@@ -261,7 +261,6 @@ if user_input:
             ticker_upper = user_input.upper()
             is_korea = ticker_upper.endswith('.KS') or ticker_upper.endswith('.KQ') or ticker_upper.isdigit()
             
-            # 시간대 설정
             if df.index.tzinfo is not None:
                 target_tz = 'Asia/Seoul' if is_korea else 'America/New_York'
                 df.index = df.index.tz_convert(target_tz)
@@ -313,8 +312,11 @@ if user_input:
                 </div>
             """, unsafe_allow_html=True)
 
-            comp_name = info_dict.get('longName', info_dict.get('shortName', user_input.upper()))
-            exchange = info_dict.get('exchange', 'MARKET')
+            # ==========================================
+            # 🚀 풀네임 & 주식코드(티커) 상단 UI 디자인 개편 영역
+            # ==========================================
+            # 기업의 공식 풀네임(`longName`)을 최우선으로 가져오도록 강화
+            comp_full_name = info_dict.get('longName', info_dict.get('shortName', company_clean_name))
             
             if len(df) >= 2:
                 close_arr = df['Close'].to_numpy().flatten()
@@ -325,13 +327,14 @@ if user_input:
             c_sign, c_arrow = ("+", "▲") if day_change >= 0 else ("", "▼")
             c_color = "#FF3232" if day_change >= 0 else "#0062FF"
 
+            # 풀네임은 크게, 코드는 뱃지 스타일로 작게 적용
             st.markdown(f"""
-                <div style='margin-bottom: 25px; padding: 10px 5px; border-left: 4px solid #4F46E5;'>
-                    <div style='display: flex; align-items: baseline; gap: 12px;'>
-                        <span style='font-size: 34px; font-weight: 800; color: #FFFFFF;'>{comp_name}</span>
-                        <span style='font-size: 15px; color: #AAAAAA;'>{exchange}: {user_input.upper()}</span>
+                <div style='margin-bottom: 25px; padding: 15px 20px; background: linear-gradient(90deg, #111111 0%, #000000 100%); border-left: 5px solid #4F46E5; border-radius: 8px;'>
+                    <div style='display: flex; align-items: baseline; gap: 10px;'>
+                        <span style='font-size: 38px; font-weight: 900; color: #FFFFFF; letter-spacing: -0.5px;'>{comp_full_name}</span>
+                        <span style='font-size: 16px; font-weight: 700; color: #A0AEC0; background-color: #2D3748; padding: 3px 10px; border-radius: 6px;'>{ticker_upper}</span>
                     </div>
-                    <div style='margin-top: 5px; display: flex; align-items: baseline; gap: 8px;'>
+                    <div style='margin-top: 10px; display: flex; align-items: baseline; gap: 8px;'>
                         <span style='font-size: 46px; font-weight: 800; color: #FFFFFF;'>{v_close:,.2f}</span>
                         <span style='font-size: 18px; color: #AAAAAA; font-weight: 600;'>{currency}</span>
                     </div>
@@ -360,7 +363,6 @@ if user_input:
                 fig.update_yaxes(range=[v_low - y_pad, v_high + y_pad], row=1, col=1)
 
             else:
-                # 💡 당일 차트(1일) X축 고정 로직 완벽 적용
                 line_color = '#FF3232' if period_return >= 0 else '#0062FF'
                 fig.add_trace(go.Scatter(x=df.index, y=df['Close'], mode='lines', line=dict(color=line_color, width=2.5),
                     fill='tozeroy', fillcolor=f'rgba({255 if period_return >= 0 else 0}, {50 if period_return >= 0 else 98}, {50 if period_return >= 0 else 255}, 0.08)', name='주가'), row=1, col=1)
