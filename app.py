@@ -313,10 +313,14 @@ if user_input:
             """, unsafe_allow_html=True)
 
             # ==========================================
-            # 🚀 풀네임 & 주식코드(티커) 상단 UI 디자인 개편 영역
+            # 🚀 공식 등록 법인명(Legal Name) 강제 추출 로직
             # ==========================================
-            # 기업의 공식 풀네임(`longName`)을 최우선으로 가져오도록 강화
-            comp_full_name = info_dict.get('longName', info_dict.get('shortName', company_clean_name))
+            # 1순위: longName (가장 공식적인 풀네임, 예: Apple Inc.)
+            # 2순위: shortName (longName이 누락된 경우)
+            # 3순위: 둘 다 없으면 티커명 자체 출력 (사용자 검색어 배제)
+            comp_full_name = info_dict.get('longName')
+            if not comp_full_name:
+                comp_full_name = info_dict.get('shortName', ticker_upper)
             
             if len(df) >= 2:
                 close_arr = df['Close'].to_numpy().flatten()
