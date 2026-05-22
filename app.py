@@ -313,15 +313,25 @@ if user_input:
             """, unsafe_allow_html=True)
 
             # ==========================================
-            # 🚀 공식 등록 법인명(Legal Name) 강제 추출 로직
+            # 🚀 강력한 풀네임 추출 로직 (이중 방어)
             # ==========================================
-            # 1순위: longName (가장 공식적인 풀네임, 예: Apple Inc.)
-            # 2순위: shortName (longName이 누락된 경우)
-            # 3순위: 둘 다 없으면 티커명 자체 출력 (사용자 검색어 배제)
-            comp_full_name = info_dict.get('longName')
-            if not comp_full_name:
-                comp_full_name = info_dict.get('shortName', ticker_upper)
+            comp_full_name = info_dict.get('longName', info_dict.get('shortName', ''))
             
+            # 1차 실패: yfinance info가 빈 문자열일 경우, Search API를 통해 DB에서 강제로 긁어오기
+            if not comp_full_name:
+                try:
+                    backup_search = yf.Search(user_input, max_results=1).quotes
+                    if backup_search:
+                        comp_full_name = backup_search[0].get('longname', backup_search[0].get('shortname', ''))
+                except:
+                    pass
+            
+            # 2차 실패: 그래도 없으면 사용자 검색어 표시 후 티커 표시
+            if not comp_full_name:
+                comp_full_name = company_clean_name if company_clean_name != ticker_upper else f"주식회사 {ticker_upper}"
+
+            # ==========================================
+
             if len(df) >= 2:
                 close_arr = df['Close'].to_numpy().flatten()
                 day_change = float(close_arr[-1] - close_arr[-2])
